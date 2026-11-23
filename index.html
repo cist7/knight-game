@@ -77,6 +77,7 @@ const sfx={
   coin:()=>{tone(988,988,.06,'square',.035);tone(1319,1319,.12,'square',.035,.06)},
   hurt:()=>tone(400,80,.3,'sawtooth',.07),
   heavy:()=>{noise(.2,.18,1400);tone(200,60,.25,'sawtooth',.07)},
+  boom:()=>{noise(.45,.25,280);tone(140,38,.45,'sawtooth',.08)},
   kill:()=>{noise(.25,.12,500);tone(300,60,.3,'triangle',.06)},
   heal:()=>{tone(523,523,.08,'triangle',.06);tone(659,659,.08,'triangle',.06,.08);tone(784,784,.15,'triangle',.06,.16)},
   bow:()=>noise(.08,.06,3000),
@@ -150,7 +151,7 @@ const E_DMG=[1,1.5,2],SWORD=[1,2,3],BOSS_HP=[60,100,160];
 let grounds,plats,CPS,stage=0,MULT=1,stageScore=0,bannerT=0;
 const STARS=Array.from({length:60},()=>[Math.random()*W,Math.random()*200,Math.random()*1.5+.3]);
 
-let rings=[],flashT=0,player,enemies,arrows,waves,parts,texts,coins,potions,boss,cps,cam,shake,score,state='title',stateT=0,cpIdx,swingId,time,bossOn,winT,hitstop,hintT;
+let booms=[],rings=[],flashT=0,player,enemies,arrows,waves,parts,texts,coins,potions,boss,cps,cam,shake,score,state='title',stateT=0,cpIdx,swingId,time,bossOn,winT,hitstop,hintT;
 
 function surfFor(x,pi){
   if(pi!=null){const p=plats[pi];return[p.x+14,p.x+p.w-14,p.y]}
@@ -176,7 +177,7 @@ function init(s=0){
   const bhp=BOSS_HP[s];
   boss={type:'boss',x:6050,y:GY,w:54,h:112,hp:bhp,max:bhp,face:-1,state:'sleep',t:0,vx:0,vy:0,flash:0,hitBy:-1,dead:false,anim:0,onGround:true,sHit:false};
   cps=CPS.map((x,i)=>({x,on:i===0}));
-  arrows=[];waves=[];parts=[];texts=[];rings=[];flashT=0;
+  arrows=[];waves=[];parts=[];texts=[];rings=[];booms=[];flashT=0;
   cam=0;shake=0;cpIdx=0;swingId=0;bossOn=false;winT=0;hitstop=0;hintT=6;
 }
 
@@ -186,6 +187,13 @@ function sparks(x,y,n=8,col='#ffe08a'){for(let i=0;i<n;i++)part(x,y,rand(-260,26
 function dust(x,y,n=5){for(let i=0;i<n;i++)part(x+rand(-10,10),y-2,rand(-60,60),rand(-80,-20),rand(.3,.6),'rgba(200,180,150,.7)',rand(3,6),-50)}
 function bones(x,y,col='#e9e2cc'){for(let i=0;i<14;i++)part(x,y,rand(-280,280),rand(-500,-100),rand(.6,1.1),col,rand(3,6),1400)}
 function text(x,y,s,col='#ffe08a'){texts.push({x,y,s,col,life:1})}
+function explode(x,y,sz=1,quiet){
+  booms.push({x,y,s:sz,life:.55,max:.55});
+  const fire=['#fff3c0','#ffd34d','#ff9b3a','#ff5a2a'];
+  for(let i=0;i<26*sz;i++){const a=rand(0,Math.PI*2),v=rand(120,520)*sz;part(x,y,Math.cos(a)*v,Math.sin(a)*v-80,rand(.25,.6),fire[i%4],rand(3,7)*sz,500)}
+  for(let i=0;i<10*sz;i++)part(x+rand(-14,14)*sz,y+rand(-14,14)*sz,rand(-60,60),rand(-120,-40),rand(.6,1.1),'rgba(70,60,70,.55)',rand(8,14)*sz,-80);
+  shake=Math.max(shake,6*sz);if(!quiet)sfx.boom();
+}
 
 /* ---------- 물리 ---------- */
 function physics(b,dt){
@@ -317,6 +325,7 @@ function updEnemy(e,dt){
 }
 function killE(e){
   e.dead=true;const pts=e.type==='skel'?100:150;score+=pts;text(e.x,e.y-e.h-10,'+'+pts);
+  explode(e.x,e.y-e.h/2,1);hitstop=Math.max(hitstop,.06);
   bones(e.x,e.y-e.h/2,e.type==='skel'?'#e9e2cc':'#6fae4a');sfx.kill();
   if(Math.random()<.22)potions.push({x:e.x,y:e.y-14});
 }
@@ -331,7 +340,7 @@ function bossChoose(){
 }
 function updBoss(dt){
   const b=boss;
-  if(b.dead){if(Math.random()<.4)sparks(b.x+rand(-30,30),b.y-rand(10,100),2,'#ff9b5b');return}
+  if(b.dead){if(winT>1.2&&Math.random()<.1)explode(b.x+rand(-45,45),b.y-rand(20,120),.7,Math.random()<.5);return}
   if(b.state==='sleep'){if(player.x>ARENA+180&&player.alive){bossOn=true;b.state='intro';b.t=1.4;sfx.roar();shake=14}return}
   b.flash=Math.max(0,b.flash-dt);b.t-=dt;b.anim+=dt;
   const dx=player.x-b.x,adx=Math.abs(dx),ph2=b.hp<=b.max/2;
@@ -358,14 +367,14 @@ function updBoss(dt){
   b.vy+=G*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.onGround=false;
   if(b.y>=GY){b.y=GY;b.vy=0;b.onGround=true}
   b.x=clamp(b.x,ARENA+40,END-40);
-  if(player.alive&&b.state!=='intro'&&ov(ebox(b),pbox())){
+  if(player.alive&&b.state==='charge'&&ov(ebox(b),pbox())){
     const r=hurtPlayer(1,b.x);
-    if(r==='blocked'&&b.state==='charge'){b.state='recover';b.t=.9;b.vx=-b.face*160;shake=7}
+    if(r==='blocked'){b.state='recover';b.t=.9;b.vx=-b.face*160;shake=7}
   }
 }
 function killBoss(){
   const b=boss;b.dead=true;winT=2.6;score+=3000;text(b.x,b.y-150,'+3000');
-  sfx.kill();sfx.slam();shake=20;arrows=[];waves=[];
+  sfx.kill();sfx.slam();explode(b.x,b.y-60,2);shake=20;arrows=[];waves=[];
   for(let i=0;i<4;i++)bones(b.x,b.y-60,'#6b6b7a');
 }
 
@@ -476,6 +485,7 @@ function updFx(dt){
   for(const t of texts){t.y-=40*dt;t.life-=dt}
   texts=texts.filter(t=>t.life>0);
   for(const r of rings){r.r+=950*dt;r.life-=dt}
+  for(const o of booms)o.life-=dt;booms=booms.filter(o=>o.life>0);
   rings=rings.filter(r=>r.life>0);
   flashT=Math.max(0,flashT-dt);
 }
@@ -863,6 +873,13 @@ function draw(){
   arrows.forEach(drawArrow);waves.forEach(drawWave);
   for(const r of rings){const a=clamp(r.life/.6,0,1);ctx.strokeStyle=`rgba(255,230,150,${a})`;ctx.lineWidth=14*a+2;ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,7);ctx.stroke();
     ctx.strokeStyle=`rgba(255,255,255,${a*.7})`;ctx.lineWidth=4;ctx.beginPath();ctx.arc(r.x,r.y,r.r*.85,0,7);ctx.stroke()}
+  for(const o of booms){
+    const k=1-o.life/o.max,r=(18+62*eo(k))*o.s,a=1-k;
+    const g=ctx.createRadialGradient(o.x,o.y,0,o.x,o.y,r);
+    g.addColorStop(0,`rgba(255,250,220,${a})`);g.addColorStop(.35,`rgba(255,200,80,${a*.9})`);g.addColorStop(.7,`rgba(255,90,30,${a*.6})`);g.addColorStop(1,'rgba(120,20,10,0)');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(o.x,o.y,r,0,7);ctx.fill();
+    ctx.strokeStyle=`rgba(255,230,170,${a*.8})`;ctx.lineWidth=(6*a+1)*o.s;ctx.beginPath();ctx.arc(o.x,o.y,r*1.35,0,7);ctx.stroke();
+  }
   for(const q of parts){ctx.globalAlpha=clamp(q.life/q.max,0,1);ctx.fillStyle=q.col;ctx.fillRect(q.x-q.size/2,q.y-q.size/2,q.size,q.size)}
   ctx.globalAlpha=1;
   for(const t of texts){ctx.globalAlpha=clamp(t.life*1.5,0,1);label(t.s,t.x,t.y,16,t.col)}
